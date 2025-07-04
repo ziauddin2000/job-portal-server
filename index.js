@@ -1,13 +1,43 @@
 import express from "express";
 import cors from "cors";
+import jwt from "jsonwebtoken";
+import cookieParser from "cookie-parser";
 import "dotenv/config";
 const app = express();
 const port = process.env.PORT || 5000;
 import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
+
+// Verification Api Middleware
+let verificationApi = (req, res, next) => {
+  let token = req?.cookies?.token;
+
+  if (!token) {
+    {
+      return res.status(401).send({ error: "Unauthorized access" });
+    }
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, function (err, decoded) {
+    if (err) {
+      res.status(401).send({ error: "Unauthorized access" });
+    }
+
+    // set user email to access later in api
+    req.user = decoded;
+
+    next();
+  });
+};
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.zui8vyn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -30,6 +60,33 @@ async function run() {
     const jobApplicationCollection = client
       .db("jobs-portal")
       .collection("job_applications");
+
+    // JWT Token generate
+    app.post("/jwt", async (req, res) => {
+      let user = req.body;
+      let token = await jwt.sign(user, process.env.JWT_SECRET, {
+        expiresIn: "1h",
+      });
+
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: false,
+          sameSite: "strict",
+        })
+        .send({ success: true });
+    });
+
+    // Jwt Logout
+    app.post("/logout", (req, res) => {
+      res
+        .clearCookie("token", {
+          httpOnly: true,
+          secure: false,
+          sameSite: "strict",
+        })
+        .send({ success: true });
+    });
 
     // Jobs APIs
 
@@ -65,7 +122,7 @@ async function run() {
     });
 
     // change status of job applications
-    app.path("/application/status/:appId", async (req, res) => {
+    app.patch("/application/status/:appId", async (req, res) => {
       let appId = req.params.appId;
       let status = req.body;
 
@@ -115,10 +172,14 @@ async function run() {
     });
 
     // Get Application based on email
-    app.get("/job-application", async (req, res) => {
+    app.get("/job-application", verificationApi, async (req, res) => {
       let email = req.query.email;
       let query = { email };
       let result = await jobApplicationCollection.find(query).toArray();
+
+      if (req.user.email !== email) {
+        return res.status(403).send({ error: "Forbidden access" });
+      }
 
       // let's get job details too
       for (const application of result) {
