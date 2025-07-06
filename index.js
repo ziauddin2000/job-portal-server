@@ -97,12 +97,43 @@ async function run() {
     // get all jobs
     app.get("/jobs", async (req, res) => {
       let email = req.query.email;
+      let sort = req.query?.sort;
+      let search = req.query?.search;
+      let minSalary = req.query?.minSalary;
+      let maxSalary = req.query?.maxSalary;
+
       let query = {};
       if (email) {
         query = { hr_email: email };
       }
 
-      let cursor = jobCollection.find(query);
+      let sortQuery = {};
+      if (sort == "true") {
+        sortQuery = { "salaryRange.min": -1 }; // order by salary descending
+      }
+
+      if (search) {
+        query.location = { $regex: search, $options: "i" }; // options 'i' for case-insensitive search
+      }
+
+      // If both condition provided
+      // if (minSalary && maxSalary) {
+      //   query = {
+      //     ...query,
+      //     "salaryRange.min": { $gte: parseInt(minSalary) },
+      //     "salaryRange.max": { $lte: parseInt(maxSalary) },
+      //   };
+      // }
+
+      if (minSalary) {
+        query["salaryRange.min"] = { $gte: parseInt(minSalary) };
+      }
+
+      if (maxSalary) {
+        query["salaryRange.max"] = { $lte: parseInt(maxSalary) };
+      }
+
+      let cursor = jobCollection.find(query).sort(sortQuery);
       let result = await cursor.toArray();
       res.send(result);
     });
